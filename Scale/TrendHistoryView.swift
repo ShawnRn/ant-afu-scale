@@ -94,7 +94,7 @@ enum TrendRenderPhase: Int, Comparable {
 }
 
 /// 将倒序的历史记录按自然日聚合（每组取当天最新一次测量作为代表），返回按日期升序排列的日聚合列表
-func aggregateDailyRecords(from records: [Measurement]) -> [DailyTrendRecord] {
+nonisolated func aggregateDailyRecords(from records: [Measurement]) -> [DailyTrendRecord] {
     guard !records.isEmpty else { return [] }
 
     let calendar = Calendar.current
@@ -135,7 +135,7 @@ func aggregateDailyRecords(from records: [Measurement]) -> [DailyTrendRecord] {
 }
 
 /// 根据时间跨度筛选日聚合记录
-func filterDailyRecords(_ daily: [DailyTrendRecord], for range: TrendTimeRange) -> [DailyTrendRecord] {
+nonisolated func filterDailyRecords(_ daily: [DailyTrendRecord], for range: TrendTimeRange) -> [DailyTrendRecord] {
     switch range {
     case .recent7:
         let calendar = Calendar.current
