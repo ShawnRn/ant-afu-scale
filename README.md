@@ -4,7 +4,13 @@
 
 # Scale · 蚂蚁阿福体脂秤
 
-一个纯原生 iOS 体脂秤应用，通过蓝牙低功耗（BLE）直连蚂蚁阿福（沃莱）体脂秤，读取实时体重与生物阻抗，本地高精度算法估算 18 项身体成分，支持 Swift Charts 平滑趋势分析、iCloud 无感云端同步，并双向联动 Apple「健康」。
+一个纯原生 iOS 体脂秤应用，通过蓝牙低功耗（BLE）直连蚂蚁阿福（沃莱）体脂秤，读取实时体重与生物阻抗，本地高精度算法估算 18 项身体成分，支持 Swift Charts 平滑趋势分析、免开发者账号 iCloud 云盘双向同步，并双向联动 Apple「健康」。
+
+<p float="center">
+  <img src="readme.assets/result_trend.jpg" width="28%" alt="测量结果与近期走势" />
+  <img src="readme.assets/result_details.jpg" width="28%" alt="18项身体指标详情" />
+  <img src="readme.assets/profile_icloud.jpg" width="28%" alt="我的资料与 iCloud 设置" />
+</p>
 
 </div>
 
@@ -17,17 +23,22 @@
 - **18 项身体成分本地估算**：纯离线运行生物电阻抗（BIA）算法，精准估算体脂率、BMI、去脂体重、肌肉量、骨量、内脏脂肪等级、体水分率、基础代谢等全面生理指标。
 - **Swift Charts 趋势分析**：
   - 基于 iOS 原生 `Charts` 打造，使用 `.monotone` 单调 Hermite 平滑曲线与渐变区域图；
-  - 涵盖近 7 次、近 30 次与全部历史跨度；
-  - 支持在「体重」、「体脂率」、「肌肉量」、「内脏脂肪」、「体水分率」之间自由切换分析；
-  - 测量完成界面搭载「近期走势」卡片与「较上次变化」即时微胶囊反馈，折线图高亮标记本次测量。
-- **iCloud 云端跨设备同步**：基于 `NSUbiquitousKeyValueStore` 实现端到端增量同步，支持多设备静默同步与实时状态指示（空闲、同步中、完成、错误），离线时自动优雅降级。
+  - **按天聚合（Daily Aggregation）**：折线图按自然日对齐（近 7 天、近 30 天与全部），同一天多次测量自动取最新代表值；
+  - 支持在「体重」、「体脂率」、「肌肉量」、「内脏脂肪」、「体水分率」等多指标间自由切换分析；
+  - 测量完成界面搭载「近期走势」卡片与「较上次变化」即时微胶囊反馈，折线图高亮标记本次测量；
+  - 采用阶梯式异步分批加载渲染，保障 TabView 120Hz 满帧秒切体验。
+- **☁️ 免开发者账号 iCloud 云盘双向同步**：
+  - 基于 Apple 官方**安全范围书签（Security-Scoped Bookmark）**技术，在「我的资料」中通过系统文件选择器指定一次「iCloud 云盘」专属目录（如新建 `Scale` 文件夹），即可获得系统级持久化访问授权；
+  - 每次测量完成自动将本地沙盒与云盘中的 `measurements_history.json` 按照时间戳双向增量去重合并，多台设备（iPhone / iPad）间无缝共享，**彻底摆脱 99 美元付费开发者账号限制**；
+  - 支持系统文件共享（`UIFileSharingEnabled`），在 iOS「文件」App 的「我的 iPhone」中自动生成「体脂秤」专属文件夹，数据文件持久化于沙盒 `Documents` 目录，支持随时查看、导出与备份。
 - **Apple「健康」双向联动**：
-  - 测量完成后静默写入体重、体脂率、BMI、去脂体重；
-  - 首次或按需从「健康」自动拉取最新的身高、生理性别与实际年龄，免去手动配置。
+  - 首次或按需从「健康」自动拉取最新的身高、生理性别与实际年龄（根据出生日期计算），免去手动配置；
+  - 测量完成后静默写入体重、体脂率、BMI、去脂体重（支持独立开关控制）。
 - **高质感 Apple 原生交互**：
-  - 支持自定义个人大头像持久化存储；
+  - 支持自定义个人大头像，内置硬件加速缩略图降采样与沙盒持久化；
+  - 身高、年龄、性别等精细调整独立拆分为「身体资料」二级设置页面，主资料页仅展示核心摘要；
   - 历史记录支持长按唤起完整功能菜单（查看详情、拷贝数据、删除记录）并呈现精致的**快照卡片预览**；
-  - 页面支持全屏从任意位置边缘与中央平滑右滑返回。
+  - 页面支持全屏从任意位置边缘与中央平滑右滑返回，底栏全程平稳过渡无闪烁。
 
 > ⚠️ 体脂等身体成分为基于体脂秤硬件提供的原始阻抗通过本地公式估算，与原厂 App 的计算模型可能略有出入，仅供日常健身健康管理参考。
 
@@ -41,7 +52,7 @@
 
 从 Releases 下载最新安装包：
 
-> 📦 [Scale.v0.1.ipa](https://github.com/ShawnRn/ant-afu-scale/releases)
+> 📦 [Scale-v1.1.1.ipa](https://github.com/ShawnRn/ant-afu-scale/releases/tag/v1.1.1)
 
 ---
 
@@ -86,7 +97,7 @@
 2. **开发者模式**（iOS 16+）：前往 *设置 → 隐私与安全性 → 开发者模式* 开启并重启手机；
 3. **权限授予**：
    - **蓝牙**：连接体脂秤必须权限；
-   - **健康**：将数据自动同步至 Apple Health（可在「我的资料」中随时控制开关）；
+   - **健康**：读取生理资料并将测量数据自动同步至 Apple Health（可在「我的资料」中随时控制开关）；
 4. **开始测量**：确保手机蓝牙开启，光脚站上体脂秤保持静止，读数稳定后自动保存并展示完整分析报告。
 
 ---
@@ -95,16 +106,17 @@
 
 | 文件 | 职责说明 |
 | --- | --- |
-| [ContentView.swift](Scale/ContentView.swift) | 主交互界面：测量状态、测量结果页（含近期走势图表与对比胶囊）、个人资料页 |
-| [TrendHistoryView.swift](Scale/TrendHistoryView.swift) | 趋势与历史：Swift Charts 平滑图表、多指标/时间分段器、解耦懒加载流水列表与长按快照 |
-| [HistoryStore.swift](Scale/HistoryStore.swift) | 本地持久化存储引擎：沙盒 JSON 数据读取、写入、排序去重与删除 |
-| [CloudSyncManager.swift](Scale/CloudSyncManager.swift) | iCloud 增量双向同步：跨设备同步状态机、后台通知监听与优雅降级 |
+| [ContentView.swift](Scale/ContentView.swift) | 主交互界面：TabView 容器、测量状态、测量结果详情页（含近期走势图表与较上次对比胶囊）、个人资料页与二级身体资料调整 |
+| [TrendHistoryView.swift](Scale/TrendHistoryView.swift) | 趋势与历史：Swift Charts 平滑走势图、按天聚合、解耦懒加载历史列表与长按快照预览 |
+| [HistoryStore.swift](Scale/HistoryStore.swift) | 本地持久化存储：沙盒 `Documents/measurements_history.json` 读取、异步写盘、排序去重与平滑迁移 |
+| [CloudSyncManager.swift](Scale/CloudSyncManager.swift) | iCloud 云盘同步：基于安全范围书签（Security-Scoped Bookmark）免开发者账号的全自动双向增量同步 |
 | [BluetoothManager.swift](Scale/BluetoothManager.swift) | CoreBluetooth 通信：自动扫描连接、状态管理与稳定重量防抖判定 |
 | [Scale27.swift](Scale/Scale27.swift) | 沃莱 "Scale27" 协议层：20 字节数据包解包、阻抗归一化与控制包封装 |
 | [BodyComposition.swift](Scale/BodyComposition.swift) | 18 项身体成分生物阻抗估算算法模型与参考标准区间 |
-| [HealthKitManager.swift](Scale/HealthKitManager.swift) | Apple「健康」写入（体重、体脂率、BMI、去脂体重）与生理信息读取 |
-| [AvatarManager.swift](Scale/AvatarManager.swift) | 原生个人头像沙盒存储与缓存管理器 |
-| [UserProfile.swift](Scale/UserProfile.swift) | 用户生理数据模型（身高、年龄、性别）持久化 |
+| [HealthKitManager.swift](Scale/HealthKitManager.swift) | Apple「健康」双向打通：写入测量结果（体重、体脂率、BMI、去脂体重）与读取生理信息（身高、年龄、性别） |
+| [AvatarManager.swift](Scale/AvatarManager.swift) | 原生个人头像硬件加速降采样与沙盒持久化管理器 |
+| [UserProfile.swift](Scale/UserProfile.swift) | 用户生理数据模型（身高、年龄、性别）与 UserDefaults 持久化 |
+| [AppLog.swift](Scale/AppLog.swift) | 零开销日志系统：Release 编译期剥离蓝牙高频数据包计算与控制台 I/O 阻塞 |
 | [AGENTS.md](AGENTS.md) | AI Agents 与工程开发指南、零警告规范与设计模式说明 |
 
 ---
