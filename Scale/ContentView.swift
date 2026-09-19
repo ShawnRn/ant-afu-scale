@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import Charts
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var ble = BluetoothManager()
@@ -942,6 +943,7 @@ struct ProfileView: View {
     @State private var healthSyncSuccess: Bool = true
 
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var showingFolderPicker: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1002,39 +1004,82 @@ struct ProfileView: View {
                     .padding(.vertical, 4)
                 }
 
-                // MARK: - iCloud 云端同步
+                // MARK: - iCloud 云盘同步（基于安全书签免开发者账号机制）
                 Section {
-                    HStack {
-                        Image(systemName: "icloud.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color.accentColor)
+                    if cloudSync.isFolderBound {
+                        HStack {
+                            Image(systemName: "folder.badge.gearshape")
+                                .font(.title3)
+                                .foregroundStyle(Color.accentColor)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("iCloud 跨设备同步")
-                                .font(.body)
-                            Text(cloudSync.statusMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("同步目录：\(cloudSync.boundFolderName)")
+                                    .font(.body.weight(.medium))
+                                Text(cloudSync.statusMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                cloudSync.syncNow(historyStore: historyStore)
+                            } label: {
+                                if cloudSync.isSyncing {
+                                    ProgressView()
+                                } else {
+                                    Text("立即同步")
+                                        .font(.subheadline)
+                                }
+                            }
+                            .disabled(cloudSync.isSyncing)
                         }
-
-                        Spacer()
 
                         Button {
-                            cloudSync.syncNow(historyStore: historyStore)
+                            showingFolderPicker = true
                         } label: {
-                            if cloudSync.isSyncing {
-                                ProgressView()
-                            } else {
-                                Text("立即同步")
-                                    .font(.subheadline)
-                            }
+                            Label("更换 iCloud 文件夹", systemImage: "folder")
                         }
-                        .disabled(cloudSync.isSyncing)
+
+                        Button(role: .destructive) {
+                            cloudSync.unbindFolder()
+                        } label: {
+                            Label("解除文件夹绑定", systemImage: "trash")
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Image(systemName: "icloud.slash")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("未绑定 iCloud 云盘文件夹")
+                                        .font(.body.weight(.medium))
+                                    Text("绑定后每次测量自动静默同步至云盘")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Button {
+                                showingFolderPicker = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.rectangle.on.folder.fill")
+                                    Text("选择 iCloud 云盘专属文件夹")
+                                        .fontWeight(.medium)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.vertical, 4)
                     }
                 } header: {
-                    Text("云端同步")
+                    Text("iCloud 云盘同步")
                 } footer: {
-                    Text("历史测量数据将通过 iCloud 在您的各台 iPhone 和 iPad 间自动加密同步。")
+                    Text("无需开发者账号。在「iCloud 云盘」中指定任意文件夹（如新建 Scale）即可自动跨设备静默同步，并在 iOS「文件」App 中清晰可见。")
                 }
 
                 // MARK: - Apple「健康」同步
@@ -1113,6 +1158,20 @@ struct ProfileView: View {
                        let img = UIImage(data: data) {
                         avatarManager.saveAvatar(img)
                     }
+                }
+            }
+            .fileImporter(
+                isPresented: $showingFolderPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        cloudSync.bindFolder(url: url, historyStore: historyStore)
+                    }
+                case .failure(let error):
+                    AppLog("选择 iCloud 云盘文件夹失败: \(error.localizedDescription)")
                 }
             }
         }

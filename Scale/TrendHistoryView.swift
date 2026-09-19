@@ -310,7 +310,11 @@ struct TrendHistoryView<AvatarContent: View>: View {
     // MARK: - iCloud 同步指示按钮（保持原生圆盘，彻底杜绝拉伸形变）
     private var cloudSyncButton: some View {
         Button {
-            cloudSync.syncNow(historyStore: historyStore)
+            if cloudSync.isFolderBound {
+                cloudSync.syncNow(historyStore: historyStore)
+            } else {
+                onShowProfile()
+            }
         } label: {
             syncButtonIcon
         }
@@ -321,31 +325,40 @@ struct TrendHistoryView<AvatarContent: View>: View {
 
     @ViewBuilder
     private var syncButtonIcon: some View {
-        switch cloudSync.syncState {
-        case .syncing:
-            NativeActivityIndicator()
-                .frame(width: 16, height: 16)
-        case .success:
-            Image(systemName: "checkmark.icloud.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.green)
-        case .error:
-            Image(systemName: "exclamationmark.icloud.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.red)
-        case .idle:
-            Image(systemName: "icloud.fill")
+        if !cloudSync.isFolderBound {
+            Image(systemName: "icloud.slash")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.secondary)
+        } else {
+            switch cloudSync.syncState {
+            case .syncing:
+                NativeActivityIndicator()
+                    .frame(width: 16, height: 16)
+            case .success:
+                Image(systemName: "checkmark.icloud.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.green)
+            case .error:
+                Image(systemName: "exclamationmark.icloud.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.red)
+            case .idle:
+                Image(systemName: "icloud.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var syncAccessibilityLabel: String {
+        if !cloudSync.isFolderBound {
+            return "未绑定 iCloud 云盘文件夹，点击前往设置"
+        }
         switch cloudSync.syncState {
-        case .syncing: return "正在同步 iCloud"
-        case .success: return "iCloud 同步成功"
-        case .error(let msg): return "iCloud 同步失败: \(msg)"
-        case .idle: return "同步 iCloud"
+        case .syncing: return "正在同步 iCloud 云盘"
+        case .success: return "iCloud 云盘同步成功"
+        case .error(let msg): return "iCloud 云盘同步失败: \(msg)"
+        case .idle: return "同步 iCloud 云盘"
         }
     }
 

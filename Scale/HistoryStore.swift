@@ -13,15 +13,19 @@ final class HistoryStore: ObservableObject {
 
     init() {
         let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let scaleDir = appSupport.appendingPathComponent("Scale", isDirectory: true)
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let targetURL = documents.appendingPathComponent("measurements_history.json")
 
-        if !fileManager.fileExists(atPath: scaleDir.path) {
-            try? fileManager.createDirectory(at: scaleDir, withIntermediateDirectories: true)
+        // 迁移逻辑：若老版本存在于 Application Support/Scale 目录中，自动迁移至 Documents 目录（以便文件 App 可见）
+        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let oldURL = appSupport.appendingPathComponent("Scale").appendingPathComponent("measurements_history.json")
+            if fileManager.fileExists(atPath: oldURL.path) && !fileManager.fileExists(atPath: targetURL.path) {
+                try? fileManager.copyItem(at: oldURL, to: targetURL)
+                AppLog("📦 已将历史记录无缝迁移至 Documents 目录（支持文件 App 访问）")
+            }
         }
 
-        self.fileURL = scaleDir.appendingPathComponent("measurements_history.json")
+        self.fileURL = targetURL
         load()
     }
 
