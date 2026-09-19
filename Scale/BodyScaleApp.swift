@@ -1,4 +1,6 @@
 import SwiftUI
+import AppIntents
+
 
 @main
 struct BodyScaleApp: App {
