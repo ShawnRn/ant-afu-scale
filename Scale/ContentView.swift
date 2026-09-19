@@ -401,6 +401,7 @@ struct MeasurementResultView<AvatarContent: View>: View {
             }
             .padding()
         }
+        .background(TabBarFadeHelper())
         .navigationTitle("测量结果")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -483,6 +484,68 @@ struct MeasurementResultView<AvatarContent: View>: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+// MARK: - 负责在页面推入与滑动返回时，协调底栏 UITabBar 随着转场进度淡入淡出的辅助控制器
+private struct TabBarFadeHelper: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> HelperVC {
+        let vc = HelperVC()
+        vc.view.backgroundColor = .clear
+        vc.view.isUserInteractionEnabled = false
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: HelperVC, context: Context) {}
+
+    final class HelperVC: UIViewController {
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
+        }
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            animateTabBar(hidden: true)
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            animateTabBar(hidden: false)
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            // 当彻底返回到根视图（主页）时，安全兜底保证底栏 100% 恢复可见与可交互
+            if navigationController?.viewControllers.count == 1 {
+                tabBarController?.tabBar.alpha = 1.0
+                tabBarController?.tabBar.isUserInteractionEnabled = true
+            }
+        }
+
+        private func animateTabBar(hidden: Bool) {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            let targetAlpha: CGFloat = hidden ? 0.0 : 1.0
+
+            if let coordinator = transitionCoordinator {
+                coordinator.animate(alongsideTransition: { _ in
+                    tabBar.alpha = targetAlpha
+                }, completion: { context in
+                    if context.isCancelled {
+                        // 用户中途取消了滑动返回手势，恢复为原状态
+                        tabBar.alpha = hidden ? 1.0 : 0.0
+                        tabBar.isUserInteractionEnabled = !hidden
+                    } else {
+                        tabBar.alpha = targetAlpha
+                        tabBar.isUserInteractionEnabled = (targetAlpha > 0.5)
+                    }
+                })
+            } else {
+                tabBar.alpha = targetAlpha
+                tabBar.isUserInteractionEnabled = (targetAlpha > 0.5)
+            }
+        }
     }
 }
 
