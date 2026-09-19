@@ -29,6 +29,16 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         }
     }
 
+    func value(from r: DailyTrendRecord) -> Double {
+        switch self {
+        case .weight: return r.weightKg
+        case .bodyFat: return r.bodyFatPercent
+        case .muscle: return r.muscleMassKg
+        case .visceralFat: return r.visceralFat
+        case .water: return r.waterPercent
+        }
+    }
+
     var chartColor: Color {
         switch self {
         case .weight: return .blue
@@ -40,13 +50,119 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     }
 }
 
-/// 时间/记录范围
+/// 按自然日聚合的身体测量记录点（解决同日多次测量导致的重复打点与锯齿折线）
+struct DailyTrendRecord: Identifiable, Equatable {
+    let id: Date // 当天 00:00:00 (startOfDay)，用于 X 轴自然日刻度严格对齐
+    let date: Date // 当天代表记录（最新一次测量）的实际时间戳
+    let weightKg: Double
+    let bodyFatPercent: Double
+    let muscleMassKg: Double
+    let visceralFat: Double
+    let waterPercent: Double
+    let bmi: Double
+    let countOfDay: Int // 当天测量次数
+    let sourceRecord: Measurement // 当天最新一条原始记录
+
+    static func == (lhs: DailyTrendRecord, rhs: DailyTrendRecord) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.date == rhs.date &&
+        lhs.weightKg == rhs.weightKg &&
+        lhs.bodyFatPercent == rhs.bodyFatPercent &&
+        lhs.countOfDay == rhs.countOfDay
+    }
+}
+
+/// 时间/记录跨度范围
 enum TrendTimeRange: String, CaseIterable, Identifiable {
-    case recent7 = "近7次"
-    case recent30 = "近30次"
+    case recent7 = "近7天"
+    case recent30 = "近30天"
     case all = "全部"
 
     var id: String { rawValue }
+}
+
+/// 趋势页面分批渲染阶段（保障 TabView 切换动画 120Hz 满帧秒切）
+enum TrendRenderPhase: Int, Comparable {
+    case skeleton = 0 // 阶段 0：仅顶栏控制器与骨架占位，主线程 0 阻塞完成切页
+    case summary = 1  // 阶段 1：展示统计摘要（当前最新、较前日、区间）
+    case chart = 2    // 阶段 2：淡入 Swift Charts 趋势折线图
+    case full = 3     // 阶段 3：挂载完整历史记录流水列表
+
+    static func < (lhs: TrendRenderPhase, rhs: TrendRenderPhase) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+/// 将倒序的历史记录按自然日聚合（每组取当天最新一次测量作为代表），返回按日期升序排列的日聚合列表
+func aggregateDailyRecords(from records: [Measurement]) -> [DailyTrendRecord] {
+    guard !records.isEmpty else { return [] }
+
+    let calendar = Calendar.current
+    var dayMap: [Date: [Measurement]] = [:]
+    var dayOrder: [Date] = []
+
+    for record in records {
+        let startOfDay = calendar.startOfDay(for: record.date)
+        if dayMap[startOfDay] == nil {
+            dayMap[startOfDay] = [record]
+            dayOrder.append(startOfDay)
+        } else {
+            dayMap[startOfDay]?.append(record)
+        }
+    }
+
+    var dailyRecords: [DailyTrendRecord] = []
+    for day in dayOrder {
+        guard let group = dayMap[day], let latest = group.first else { continue }
+        dailyRecords.append(
+            DailyTrendRecord(
+                id: day,
+                date: latest.date,
+                weightKg: latest.weightKg,
+                bodyFatPercent: latest.bodyFatPercent,
+                muscleMassKg: latest.muscleMassKg,
+                visceralFat: latest.visceralFat,
+                waterPercent: latest.waterPercent,
+                bmi: latest.bmi,
+                countOfDay: group.count,
+                sourceRecord: latest
+            )
+        )
+    }
+
+    // 按自然日升序排列（从早到晚，以便折线图从左向右呈现时间流）
+    return dailyRecords.sorted { $0.id < $1.id }
+}
+
+/// 根据时间跨度筛选日聚合记录
+func filterDailyRecords(_ daily: [DailyTrendRecord], for range: TrendTimeRange) -> [DailyTrendRecord] {
+    switch range {
+    case .recent7:
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        if let sevenDaysAgo = calendar.date(byAdding: .day, value: -6, to: today) {
+            let inRange = daily.filter { $0.id >= sevenDaysAgo }
+            // 若近 7 个自然日内至少有 2 个点，严格按近 7 日；若数据稀疏（< 2个点），智能兜底展示最近至多 7 个有记录日
+            if inRange.count >= 2 {
+                return inRange
+            }
+        }
+        return Array(daily.suffix(7))
+
+    case .recent30:
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        if let thirtyDaysAgo = calendar.date(byAdding: .day, value: -29, to: today) {
+            let inRange = daily.filter { $0.id >= thirtyDaysAgo }
+            if inRange.count >= 2 {
+                return inRange
+            }
+        }
+        return Array(daily.suffix(30))
+
+    case .all:
+        return daily
+    }
 }
 
 /// 历史测量记录与趋势分析视图
@@ -59,18 +175,12 @@ struct TrendHistoryView<AvatarContent: View>: View {
 
     @State private var selectedMetric: TrendMetric = .weight
     @State private var selectedRange: TrendTimeRange = .recent30
-    @State private var isChartReady = false
+    @State private var renderPhase: TrendRenderPhase = .skeleton
+    @State private var allDailyRecords: [DailyTrendRecord] = []
 
-    /// 根据范围筛选并按时间正序排列（利用 records 本身已倒序存储的特性，O(1) 取 prefix 并反转）
-    private var chartRecords: [Measurement] {
-        switch selectedRange {
-        case .recent7:
-            return Array(historyStore.records.prefix(7).reversed())
-        case .recent30:
-            return Array(historyStore.records.prefix(30).reversed())
-        case .all:
-            return Array(historyStore.records.reversed())
-        }
+    /// 根据选中的时间跨度筛选出的日聚合数据
+    private var currentDailyRecords: [DailyTrendRecord] {
+        filterDailyRecords(allDailyRecords, for: selectedRange)
     }
 
     var body: some View {
@@ -81,26 +191,36 @@ struct TrendHistoryView<AvatarContent: View>: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 20) {
-                            // 1. 顶部控制栏（指标选择 + 范围选择）
+                            // 1. 顶部控制栏（指标选择 + 范围选择，首帧立即立即可交互）
                             controlHeader
 
-                            // 2. 独立摘要统计卡片（纯轻量渲染）
-                            TrendSummaryCardView(metric: selectedMetric, records: chartRecords)
+                            // 2. 独立摘要统计卡片（展示按天聚合后的当前最新、较前日与区间）
+                            if renderPhase >= .summary {
+                                TrendSummaryCardView(metric: selectedMetric, records: currentDailyRecords)
+                                    .transition(.opacity)
+                            } else {
+                                summarySkeleton
+                            }
 
-                            // 3. 独立 Swift Charts 图表（带 id 隔离，杜绝指标切换时的庞大图元插值计算）
+                            // 3. 独立 Swift Charts 图表（分批按日打点 + Monotone 极速曲线 + ID 状态隔离）
                             TrendChartSectionView(
                                 metric: selectedMetric,
                                 range: selectedRange,
-                                records: chartRecords,
-                                isReady: isChartReady
+                                records: currentDailyRecords,
+                                isReady: renderPhase >= .chart
                             )
 
-                            // 4. 独立历史记录流水列表（切换指标/范围时完全无需 Diff 或重绘）
-                            TrendHistoryListView(
-                                records: historyStore.records,
-                                onClear: { historyStore.clearAll() },
-                                onDelete: { historyStore.delete(record: $0) }
-                            )
+                            // 4. 独立历史记录流水列表（分批延后挂载，消除 TabView 切换时的主线程大列表渲染掉帧）
+                            if renderPhase >= .full {
+                                TrendHistoryListView(
+                                    records: historyStore.records,
+                                    onClear: { historyStore.clearAll() },
+                                    onDelete: { historyStore.delete(record: $0) }
+                                )
+                                .transition(.opacity)
+                            } else {
+                                historyListSkeleton
+                            }
                         }
                         .padding()
                     }
@@ -137,15 +257,54 @@ struct TrendHistoryView<AvatarContent: View>: View {
                     }
                 )
             }
-            .task {
-                if !isChartReady {
-                    await Task.yield()
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        isChartReady = true
+            .task(id: historyStore.records.count) {
+                let raw = historyStore.records
+                if raw.isEmpty {
+                    allDailyRecords = []
+                    renderPhase = .full
+                    return
+                }
+
+                // 阶段 1: 异步后台执行日聚合计算，彻底释放主线程切换动画
+                let aggregated = await Task.detached(priority: .userInitiated) {
+                    aggregateDailyRecords(from: raw)
+                }.value
+                allDailyRecords = aggregated
+
+                if renderPhase < .summary {
+                    renderPhase = .summary
+                }
+
+                // 阶段 2: 让渡 25ms（等待 TabBar 切换过渡动画过半），平滑淡入折线图
+                if renderPhase < .chart {
+                    try? await Task.sleep(nanoseconds: 25_000_000)
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        renderPhase = .chart
+                    }
+                }
+
+                // 阶段 3: 再让渡 25ms，挂载历史记录列表
+                if renderPhase < .full {
+                    try? await Task.sleep(nanoseconds: 25_000_000)
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        renderPhase = .full
                     }
                 }
             }
         }
+    }
+
+    // MARK: - 骨架占位组件（用于阶梯渲染，维持尺寸稳定杜绝跳动）
+    private var summarySkeleton: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .frame(height: 74)
+    }
+
+    private var historyListSkeleton: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .frame(height: 120)
     }
 
     // MARK: - iCloud 同步指示按钮（保持原生圆盘，彻底杜绝拉伸形变）
@@ -232,7 +391,7 @@ struct TrendHistoryView<AvatarContent: View>: View {
 // MARK: - 独立摘要统计卡片（解耦隔离，仅更新极简文字）
 private struct TrendSummaryCardView: View {
     let metric: TrendMetric
-    let records: [Measurement]
+    let records: [DailyTrendRecord]
 
     var body: some View {
         let values = records.map { metric.value(from: $0) }
@@ -247,7 +406,7 @@ private struct TrendSummaryCardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(String(format: "%.1f", latest))
+                    Text(String(format: metric == .visceralFat ? "%.0f" : "%.1f", latest))
                         .font(.system(.title2, design: .rounded, weight: .bold))
                     Text(metric.unit)
                         .font(.caption2)
@@ -260,7 +419,7 @@ private struct TrendSummaryCardView: View {
                 .frame(height: 32)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("较上次")
+                Text("较前日")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 2) {
@@ -294,18 +453,20 @@ private struct TrendSummaryCardView: View {
     }
 }
 
-// MARK: - 独立 Swift Charts 图表视图（分批次 Mark 构建 + Monotone 极速曲线 + ID 状态隔离）
+// MARK: - 独立 Swift Charts 图表视图（按日打点 + Monotone 极速曲线 + ID 状态隔离）
 private struct TrendChartSectionView: View {
     let metric: TrendMetric
     let range: TrendTimeRange
-    let records: [Measurement]
+    let records: [DailyTrendRecord]
     let isReady: Bool
 
     var body: some View {
         let color = metric.chartColor
         let values = records.map { metric.value(from: $0) }
-        let minVal = (values.min() ?? 0) * 0.95
-        let maxVal = (values.max() ?? 100) * 1.05
+        let rawMin = values.min() ?? 0
+        let rawMax = values.max() ?? 100
+        let minVal = rawMin > 0 ? rawMin * 0.95 : 0
+        let maxVal = rawMax * 1.05
 
         VStack(alignment: .leading, spacing: 12) {
             Label("\(metric.rawValue)变化趋势", systemImage: "waveform.path.ecg")
@@ -317,10 +478,10 @@ private struct TrendChartSectionView: View {
                 let method: InterpolationMethod = count > 1 ? .monotone : .linear
 
                 Chart {
-                    ForEach(records) { m in
-                        let val = metric.value(from: m)
+                    ForEach(records) { r in
+                        let val = metric.value(from: r)
                         AreaMark(
-                            x: .value("时间", m.date),
+                            x: .value("日期", r.id, unit: .day),
                             yStart: .value("基准", minVal),
                             yEnd: .value("数值", val)
                         )
@@ -334,10 +495,10 @@ private struct TrendChartSectionView: View {
                         )
                     }
 
-                    ForEach(records) { m in
-                        let val = metric.value(from: m)
+                    ForEach(records) { r in
+                        let val = metric.value(from: r)
                         LineMark(
-                            x: .value("时间", m.date),
+                            x: .value("日期", r.id, unit: .day),
                             y: .value("数值", val)
                         )
                         .interpolationMethod(method)
@@ -345,10 +506,10 @@ private struct TrendChartSectionView: View {
                         .foregroundStyle(color)
                     }
 
-                    ForEach(records) { m in
-                        let val = metric.value(from: m)
+                    ForEach(records) { r in
+                        let val = metric.value(from: r)
                         PointMark(
-                            x: .value("时间", m.date),
+                            x: .value("日期", r.id, unit: .day),
                             y: .value("数值", val)
                         )
                         .foregroundStyle(color)
@@ -359,7 +520,7 @@ private struct TrendChartSectionView: View {
                     AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                         AxisGridLine()
                         AxisTick()
-                        AxisValueLabel(format: .dateTime.month().day())
+                        AxisValueLabel(format: .dateTime.month(.twoDigits).day(.twoDigits))
                     }
                 }
                 .frame(height: 200)
@@ -600,4 +761,3 @@ private struct NativeActivityIndicator: UIViewRepresentable {
         CGSize(width: 16, height: 16)
     }
 }
-

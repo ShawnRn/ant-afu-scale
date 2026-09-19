@@ -1068,16 +1068,26 @@ struct ProfileView: View {
                 }
 
                 // MARK: - 身体资料
-                Section("身体资料（用于精准估算体脂）") {
-                    Stepper("身高：\(Int(profile.heightCm)) cm",
-                            value: $profile.heightCm, in: 80...230)
-                    Stepper("年龄：\(profile.age) 岁",
-                            value: $profile.age, in: 5...120)
-                    Picker("性别", selection: $profile.isMale) {
-                        Text("男").tag(true)
-                        Text("女").tag(false)
+                Section {
+                    NavigationLink {
+                        BodyProfileEditView(profile: $profile)
+                    } label: {
+                        HStack {
+                            Image(systemName: "figure.arms.open")
+                                .font(.title3)
+                                .foregroundStyle(Color.indigo)
+                            Text("身体资料")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("\(Int(profile.heightCm)) cm · \(profile.age) 岁 · \(profile.isMale ? "男" : "女")")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .pickerStyle(.segmented)
+                } header: {
+                    Text("身体资料")
+                } footer: {
+                    Text("用于 BIA 算法精准估算体脂、肌肉量与基础代谢等身体成分。平时自动从 Apple「健康」保持同步。")
                 }
 
                 Section {
@@ -1143,3 +1153,34 @@ struct ProfileView: View {
         }
     }
 }
+
+// MARK: - 身体资料二级编辑页面
+struct BodyProfileEditView: View {
+    @Binding var profile: UserProfile
+
+    var body: some View {
+        Form {
+            Section {
+                Stepper("身高：\(Int(profile.heightCm)) cm",
+                        value: $profile.heightCm, in: 80...230)
+                Stepper("年龄：\(profile.age) 岁",
+                        value: $profile.age, in: 5...120)
+                Picker("生理性别", selection: $profile.isMale) {
+                    Text("男").tag(true)
+                    Text("女").tag(false)
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("生理参数")
+            } footer: {
+                Text("身高、年龄与生理性别将直接作为 BIA 身体阻抗换算模型的计算因子，用于精准估算体脂率、去脂体重、骨量、肌肉量与内脏脂肪等指标。平时建议优先通过 Apple「健康」自动同步。")
+            }
+        }
+        .navigationTitle("身体资料")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            profile.save()
+        }
+    }
+}
+
