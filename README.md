@@ -52,7 +52,7 @@
 
 从 Releases 下载最新安装包：
 
-> 📦 [Scale-v1.1.1.ipa](https://github.com/ShawnRn/ant-afu-scale/releases/tag/v1.1.1)
+> 📦 [Scale-v1.2.0.ipa](https://github.com/ShawnRn/ant-afu-scale/releases/tag/v1.2.0)
 
 ---
 
