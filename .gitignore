@@ -23,3 +23,8 @@ scratch/
 dist/
 *.keychain
 *.keychain-db
+
+# Local development & private scripts
+AGENTS.md
+.agent/
+Scripts/
