@@ -404,7 +404,6 @@ struct MeasurementResultView<AvatarContent: View>: View {
         .navigationTitle("测量结果")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
