@@ -1008,9 +1008,9 @@ struct ProfileView: View {
                 Section {
                     if cloudSync.isFolderBound {
                         HStack {
-                            Image(systemName: "folder.badge.gearshape")
+                            Image(systemName: "icloud.fill")
                                 .font(.title3)
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(Color.blue)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("同步目录：\(cloudSync.boundFolderName)")
@@ -1035,51 +1035,46 @@ struct ProfileView: View {
                             .disabled(cloudSync.isSyncing)
                         }
 
+                        Button("更换 iCloud 文件夹") {
+                            showingFolderPicker = true
+                        }
+
+                        Button("解除文件夹绑定", role: .destructive) {
+                            cloudSync.unbindFolder()
+                        }
+                    } else {
                         Button {
                             showingFolderPicker = true
                         } label: {
-                            Label("更换 iCloud 文件夹", systemImage: "folder")
-                        }
-
-                        Button(role: .destructive) {
-                            cloudSync.unbindFolder()
-                        } label: {
-                            Label("解除文件夹绑定", systemImage: "trash")
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Image(systemName: "icloud.slash")
-                                    .font(.title2)
-                                    .foregroundStyle(.secondary)
+                                Image(systemName: "icloud.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(Color.blue)
+
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("未绑定 iCloud 云盘文件夹")
-                                        .font(.body.weight(.medium))
-                                    Text("绑定后每次测量自动静默同步至云盘")
-                                        .font(.caption)
+                                    Text("iCloud 云盘同步")
+                                        .foregroundStyle(.primary)
+                                    Text("跨设备自动静默同步")
+                                        .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
-                            }
 
-                            Button {
-                                showingFolderPicker = true
-                            } label: {
-                                HStack {
-                                    Image(systemName: "plus.rectangle.on.folder.fill")
-                                    Text("选择 iCloud 云盘专属文件夹")
-                                        .fontWeight(.medium)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
+                                Spacer()
+
+                                Text("未绑定")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
                             }
-                            .buttonStyle(.borderedProminent)
                         }
-                        .padding(.vertical, 4)
                     }
                 } header: {
                     Text("iCloud 云盘同步")
                 } footer: {
-                    Text("无需开发者账号。在「iCloud 云盘」中指定任意文件夹（如新建 Scale）即可自动跨设备静默同步，并在 iOS「文件」App 中清晰可见。")
+                    Text(cloudSync.isFolderBound ? "每次测量完成将自动与 iCloud 云盘中的专属文件夹静默双向同步。" : "无需开发者账号。指定「iCloud 云盘」中的任意文件夹（如新建 Scale）即可自动跨设备静默同步，并在 iOS「文件」App 中清晰可见。")
                 }
 
                 // MARK: - Apple「健康」同步
