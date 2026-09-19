@@ -1054,7 +1054,7 @@ struct ProfileView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("iCloud 云盘同步")
                                         .foregroundStyle(.primary)
-                                    Text("跨设备自动静默同步")
+                                    Text(cloudSync.statusMessage)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
@@ -1135,6 +1135,7 @@ struct ProfileView: View {
                 } footer: {
                     Text("开启后，每次测量完成将自动把体重、体脂率、BMI、去脂体重同步到 Apple「健康」App。")
                 }
+
             }
             .navigationTitle("我的资料")
             .navigationBarTitleDisplayMode(.inline)
@@ -1237,4 +1238,3 @@ struct BodyProfileEditView: View {
         }
     }
 }
-

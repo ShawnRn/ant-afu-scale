@@ -20,3 +20,6 @@ xcuserdata/
 # App specific caches
 scratch/
 *.ipa
+dist/
+*.keychain
+*.keychain-db

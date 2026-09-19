@@ -54,6 +54,16 @@ Scale/
 - 分段选择器（Segmented Control）与图表联动时，必须注意组件解耦隔离（通过独立子 View + `.id` 刷新域），阻断跨维度图元的插值补间开销，避免主线程掉帧。
 - 历史流水列表务必使用 `LazyVStack`，结合全局静态 `DateFormatter`，避免在列表单元格重绘时重复进行高开销的对象实例化。
 
+### 3.4 签名身份与 iPhone 17 Pro 专用自签
+
+- 必须同时校验 App 的 `CFBundleIdentifier`、代码签名中的 `application-identifier` 以及嵌入描述文件的 `application-identifier`；三者的 Bundle ID 部分必须完全一致。
+- 免费 Apple ID 7 天签名使用工程默认 Bundle ID `shuhui.scaleapp`。
+- Shawn 的 iPhone 17 Pro（UDID `00008150-001E58CA3E84401C`）专用自签描述文件授权 Bundle ID `app.tourmaline5269.brown6028`，Team ID 为 `8CAEUC6576`。生成给全能签的 IPA 时，必须在编译阶段显式传入 `PRODUCT_BUNDLE_IDENTIFIER=app.tourmaline5269.brown6028`，不得在签名后仅修改外层 `Info.plist`。
+- 已经过真机验证：若外层 Bundle ID 为 `shuhui.scaleapp`，但签名 App ID 为 `8CAEUC6576.app.tourmaline5269.brown6028`，文件选择器虽能展示，但选择 iCloud 文件夹时会无法正常完成授权。该现象不是同步 merge 死锁，也不应通过改写文件选择器业务逻辑规避。
+- 全能签中必须保留专用 IPA 自带的 `app.tourmaline5269.brown6028`，禁止再改回 `shuhui.scaleapp`。签名后必须运行 `Scripts/verify-iphone17pro-signature.sh <已签名 IPA>` 复核身份、HealthKit 能力与签名完整性。
+- 两种签名的 Team ID 不同，iOS 会将它们视为不同应用身份。首次切换时需重新授权 Apple「健康」并重新选择 iCloud 同步文件夹，不得承诺继承旧签名身份的系统权限或安全范围书签。
+- 不得将 p12 密码、私钥或临时 Keychain 提交到仓库，也不得在构建日志中输出这些敏感信息。
+
 ---
 
 ## 4. 验证与构建指令
@@ -69,3 +79,7 @@ Scale/
    xcodebuild -project Scale.xcodeproj -scheme "Scale App" -destination 'id=00008150-001E58CA3E84401C' CODE_SIGNING_ALLOWED=NO build
    ```
 3. **扫描最新构建日志确保 Warning 计数为 0**。
+
+### 4.1 iPhone 17 Pro 专用自签工作流
+
+为 Shawn 的 iPhone 17 Pro 制作自签包时，必须使用专用工作流 [`.agent/workflows/iphone17-pro-self-sign.md`](.agent/workflows/iphone17-pro-self-sign.md)，禁止直接将默认 `shuhui.scaleapp` IPA 交给全能签。

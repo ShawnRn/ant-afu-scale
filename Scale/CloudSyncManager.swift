@@ -56,36 +56,52 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    /// 绑定用户通过系统文件选择器选中的 iCloud 云盘目录
+    /// 绑定用户通过系统文件选择器选中的 iCloud 云盘目录（或其中的数据文件）
     func bindFolder(url: URL, historyStore: HistoryStore) {
-        guard url.startAccessingSecurityScopedResource() else {
-            self.syncState = .error("无法获取目录安全访问权限")
-            self.statusMessage = "绑定失败：无目录访问权限"
-            return
+        AppLog("📁 [CloudSync] 开始绑定 URL: \(url.path)")
+        let isAccessing = url.startAccessingSecurityScopedResource()
+        AppLog("📁 [CloudSync] startAccessingSecurityScopedResource 授权结果: \(isAccessing)")
+        defer {
+            if isAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
-        defer { url.stopAccessingSecurityScopedResource() }
+
+        // 智能兼容：若用户直接点选了 measurements_history.json 文件，自动取其父目录
+        var targetFolderURL = url
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+            if !isDir.boolValue {
+                targetFolderURL = url.deletingLastPathComponent()
+                AppLog("📁 [CloudSync] 选中的是文件，提取所在目录: \(targetFolderURL.path)")
+            }
+        } else if url.pathExtension.lowercased() == "json" {
+            targetFolderURL = url.deletingLastPathComponent()
+            AppLog("📁 [CloudSync] 选中的是 .json 后缀，提取所在目录: \(targetFolderURL.path)")
+        }
 
         do {
-            // 生成持久化安全书签
-            let bookmarkData = try url.bookmarkData(
-                options: .minimalBookmark,
+            // 生成持久化安全书签（注意：不能使用 .minimalBookmark，必须使用标准 options: [] 以包含 security scope 授权）
+            let bookmarkData = try targetFolderURL.bookmarkData(
+                options: [],
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
-            let folderName = url.lastPathComponent.isEmpty ? "iCloud 文件夹" : url.lastPathComponent
+            let folderName = targetFolderURL.lastPathComponent.isEmpty ? "iCloud 文件夹" : targetFolderURL.lastPathComponent
             UserDefaults.standard.set(bookmarkData, forKey: bookmarkKey)
             UserDefaults.standard.set(folderName, forKey: folderNameKey)
 
             self.isFolderBound = true
             self.boundFolderName = folderName
-            AppLog("📁 成功绑定 iCloud 云盘目录: \(folderName)")
+            self.statusMessage = "已绑定「\(folderName)」，正在同步..."
+            AppLog("✅ [CloudSync] 成功生成持久化安全书签，目标目录: \(folderName)，书签大小: \(bookmarkData.count) 字节")
 
             // 绑定后立即触发首次双向同步
             syncNow(historyStore: historyStore)
         } catch {
             self.syncState = .error(error.localizedDescription)
-            self.statusMessage = "保存安全书签失败: \(error.localizedDescription)"
-            AppLog("⚠️ 创建安全书签失败: \(error)")
+            self.statusMessage = "绑定失败: \(error.localizedDescription)"
+            AppLog("⚠️ [CloudSync] 创建安全书签失败: \(error.localizedDescription)")
         }
     }
 
@@ -99,91 +115,124 @@ final class CloudSyncManager: ObservableObject {
         self.lastSyncTime = nil
         self.syncState = .idle
         self.statusMessage = "未绑定 iCloud 云盘文件夹"
-        AppLog("📁 已解除 iCloud 云盘目录绑定")
+        AppLog("📁 [CloudSync] 已解除 iCloud 云盘目录绑定并清理书签")
     }
 
     /// 执行双向同步：从 iCloud 目录拉取新数据合并入本地，并将本地完整数据回写至该 iCloud 目录
     func syncNow(historyStore: HistoryStore) {
         guard isFolderBound else {
             self.statusMessage = "请先在设置中选择 iCloud 云盘文件夹"
+            AppLog("ℹ️ [CloudSync] syncNow 跳过：尚未绑定文件夹")
             return
         }
-        guard !isSyncing else { return }
+        guard !isSyncing else {
+            AppLog("ℹ️ [CloudSync] syncNow 跳过：正在同步中")
+            return
+        }
         isSyncing = true
         syncState = .syncing
         statusMessage = "正在同步 iCloud 云盘..."
+        AppLog("☁️ [CloudSync] 启动双向同步任务...")
 
-        Task {
-            // 平滑视觉体验
-            try? await Task.sleep(nanoseconds: 300_000_000)
-
-            guard let bookmarkData = UserDefaults.standard.data(forKey: bookmarkKey) else {
-                self.isSyncing = false
-                self.syncState = .error("书签数据丢失")
-                self.statusMessage = "同步失败：未找到目录书签"
+        Task.detached(priority: .userInitiated) {
+            guard let bookmarkData = UserDefaults.standard.data(forKey: self.bookmarkKey) else {
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncState = .error("书签数据丢失")
+                    self.statusMessage = "同步失败：未找到目录书签"
+                }
                 return
             }
 
             var isStale = false
             guard let folderURL = try? URL(
                 resolvingBookmarkData: bookmarkData,
-                options: .withoutUI,
+                options: [],
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) else {
-                self.isSyncing = false
-                self.syncState = .error("无法访问授权目录")
-                self.statusMessage = "同步失败：授权已失效，请重新选择文件夹"
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncState = .error("无法访问授权目录")
+                    self.statusMessage = "同步失败：授权已失效，请重新选择文件夹"
+                }
                 return
             }
 
             if isStale {
-                if let newBookmark = try? folderURL.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) {
-                    UserDefaults.standard.set(newBookmark, forKey: bookmarkKey)
+                if let newBookmark = try? folderURL.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) {
+                    UserDefaults.standard.set(newBookmark, forKey: self.bookmarkKey)
                 }
             }
 
             guard folderURL.startAccessingSecurityScopedResource() else {
-                self.isSyncing = false
-                self.syncState = .error("目录安全权限已过期")
-                self.statusMessage = "同步失败：目录无访问权限"
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncState = .error("目录安全权限已过期")
+                    self.statusMessage = "同步失败：目录无访问权限"
+                }
                 return
             }
             defer { folderURL.stopAccessingSecurityScopedResource() }
 
             let fileURL = folderURL.appendingPathComponent(self.syncFileName)
+            let coordinator = NSFileCoordinator()
+            var mergeCount = 0
 
-            do {
-                var newCount = 0
-                // 1. 若云端文件已存在，先读取并合并
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    let cloudData = try Data(contentsOf: fileURL)
-                    let cloudRecords = try JSONDecoder().decode([Measurement].self, from: cloudData)
-                    newCount = historyStore.merge(cloudRecords: cloudRecords)
+            // 1. 协调读取云端文件
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                var readError: NSError?
+                var loadedRecords: [Measurement]? = nil
+                coordinator.coordinate(readingItemAt: fileURL, options: [], error: &readError) { readURL in
+                    if let cloudData = try? Data(contentsOf: readURL),
+                       let cloudRecords = try? JSONDecoder().decode([Measurement].self, from: cloudData) {
+                        loadedRecords = cloudRecords
+                    }
                 }
+                if let loadedRecords = loadedRecords {
+                    mergeCount = await MainActor.run {
+                        historyStore.merge(cloudRecords: loadedRecords)
+                    }
+                }
+                if let readError = readError {
+                    AppLog("⚠️ 协调读取云端文件警告: \(readError.localizedDescription)")
+                }
+            }
 
-                // 2. 将本地最新的完整数据集写入云端文件
-                let allRecords = historyStore.records
-                let encodedData = try JSONEncoder().encode(allRecords)
-                try encodedData.write(to: fileURL, options: [.atomicWrite])
+            // 2. 协调回写最新完整数据集至云端
+            let currentRecords = await MainActor.run { historyStore.records }
+            do {
+                let encodedData = try JSONEncoder().encode(currentRecords)
+                var writeError: NSError?
+                coordinator.coordinate(writingItemAt: fileURL, options: [], error: &writeError) { writeURL in
+                    do {
+                        try encodedData.write(to: writeURL)
+                    } catch {
+                        AppLog("⚠️ 写入云端文件失败: \(error)")
+                    }
+                }
 
                 let now = Date()
-                self.lastSyncTime = now
-                UserDefaults.standard.set(now, forKey: self.lastSyncKey)
-                self.isSyncing = false
-                self.syncState = .success
-
-                if newCount > 0 {
-                    self.statusMessage = "同步成功，已合并 \(newCount) 条云端新记录"
-                } else {
-                    self.statusMessage = "已是最新（\(Self.dateFormatter.string(from: now))）"
+                let finalMergeCount = mergeCount
+                await MainActor.run {
+                    self.lastSyncTime = now
+                    UserDefaults.standard.set(now, forKey: self.lastSyncKey)
+                    self.isSyncing = false
+                    self.syncState = .success
+                    if finalMergeCount > 0 {
+                        self.statusMessage = "同步成功，已合并 \(finalMergeCount) 条云端记录"
+                    } else {
+                        self.statusMessage = "已是最新（\(Self.dateFormatter.string(from: now))）"
+                    }
                 }
-                AppLog("✅ iCloud 云盘同步完成，文件大小: \(encodedData.count)B")
+                AppLog("✅ iCloud 云盘同步成功完成")
             } catch {
-                self.isSyncing = false
-                self.syncState = .error(error.localizedDescription)
-                self.statusMessage = "同步失败：\(error.localizedDescription)"
-                AppLog("⚠️ 读写 iCloud 云盘文件失败: \(error)")
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncState = .error(error.localizedDescription)
+                    self.statusMessage = "同步失败：\(error.localizedDescription)"
+                }
+                AppLog("⚠️ 编码或写入云端文件失败: \(error)")
             }
         }
     }
@@ -197,16 +246,20 @@ final class CloudSyncManager: ObservableObject {
             var isStale = false
             guard let folderURL = try? URL(
                 resolvingBookmarkData: bookmarkData,
-                options: .withoutUI,
+                options: [],
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ), folderURL.startAccessingSecurityScopedResource() else { return }
             defer { folderURL.stopAccessingSecurityScopedResource() }
 
-            let fileURL = folderURL.appendingPathComponent("measurements_history.json")
+            let fileURL = folderURL.appendingPathComponent(self.syncFileName)
+            let coordinator = NSFileCoordinator()
             do {
                 let data = try JSONEncoder().encode(records)
-                try data.write(to: fileURL, options: [.atomicWrite])
+                var writeError: NSError?
+                coordinator.coordinate(writingItemAt: fileURL, options: [], error: &writeError) { writeURL in
+                    try? data.write(to: writeURL)
+                }
                 AppLog("☁️ 静默向 iCloud 云盘推送最新数据完成")
             } catch {
                 AppLog("⚠️ 静默推送至 iCloud 云盘失败: \(error)")
