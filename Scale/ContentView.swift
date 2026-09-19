@@ -185,7 +185,7 @@ struct ContentView: View {
                 }
             }
         } catch {
-            print("HealthKit 同步失败: \(error)")
+            AppLog("HealthKit 同步失败: \(error)")
         }
     }
 

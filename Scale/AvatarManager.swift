@@ -32,11 +32,28 @@ final class AvatarManager: ObservableObject {
         self.avatarImage = image
     }
 
-    /// 保存头像到本地文件缓存
+    /// 保存头像到本地文件缓存（自动降采样为 320x320 高清缩略图，并异步写盘）
     func saveAvatar(_ image: UIImage) {
-        self.avatarImage = image
-        if let data = image.jpegData(compressionQuality: 0.85) {
-            try? data.write(to: cacheFileURL)
+        // 1. 硬件加速降采样为 320x320 规格（足以覆盖 @3x Retina 屏幕），消除超大原图造成的内存爆炸
+        let targetSize = CGSize(width: 320, height: 320)
+        let processedImage: UIImage
+        if let thumb = image.preparingThumbnail(of: targetSize) {
+            processedImage = thumb
+        } else {
+            let renderer = UIGraphicsImageRenderer(size: targetSize)
+            processedImage = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+        }
+
+        self.avatarImage = processedImage
+
+        // 2. 后台异步执行 JPEG 压缩与沙盒文件持久化，完全不卡死主线程
+        let fileURL = self.cacheFileURL
+        Task.detached(priority: .utility) {
+            if let data = processedImage.jpegData(compressionQuality: 0.85) {
+                try? data.write(to: fileURL, options: [.atomicWrite])
+            }
         }
     }
 

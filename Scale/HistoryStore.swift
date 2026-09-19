@@ -38,7 +38,7 @@ final class HistoryStore: ObservableObject {
             // 按日期倒序排列（最新的在最前面）
             self.records = decoded.sorted(by: { $0.date > $1.date })
         } catch {
-            print("⚠️ 读取历史测量记录失败: \(error)")
+            AppLog("⚠️ 读取历史测量记录失败: \(error)")
             self.records = []
         }
     }
@@ -88,13 +88,17 @@ final class HistoryStore: ObservableObject {
         return newItems.count
     }
 
-    /// 将记录写回本地沙盒文件
+    /// 将记录写回本地沙盒文件（后台异步写入，完全不卡死主线程）
     private func persist() {
-        do {
-            let data = try JSONEncoder().encode(records)
-            try data.write(to: fileURL, options: [.atomicWrite, .completeFileProtection])
-        } catch {
-            print("⚠️ 写入历史记录文件失败: \(error)")
+        let currentRecords = self.records
+        let targetURL = self.fileURL
+        Task.detached(priority: .utility) {
+            do {
+                let data = try JSONEncoder().encode(currentRecords)
+                try data.write(to: targetURL, options: [.atomicWrite, .completeFileProtection])
+            } catch {
+                AppLog("⚠️ 写入历史记录文件失败: \(error)")
+            }
         }
     }
 }

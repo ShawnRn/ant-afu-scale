@@ -83,7 +83,7 @@ final class CloudSyncManager: ObservableObject {
                 self.isSyncing = false
                 self.syncState = .error(error.localizedDescription)
                 self.statusMessage = "同步失败：\(error.localizedDescription)"
-                print("⚠️ iCloud 同步失败: \(error)")
+                AppLog("⚠️ iCloud 同步失败: \(error)")
             }
         }
     }
@@ -95,7 +95,7 @@ final class CloudSyncManager: ObservableObject {
             self.syncState = .success
         } catch {
             self.syncState = .error(error.localizedDescription)
-            print("⚠️ 上传至 iCloud 失败: \(error)")
+            AppLog("⚠️ 上传至 iCloud 失败: \(error)")
         }
     }
 
@@ -117,7 +117,7 @@ final class CloudSyncManager: ObservableObject {
             let records = try JSONDecoder().decode([Measurement].self, from: data)
             return records
         } catch {
-            print("⚠️ 解析云端数据失败: \(error)")
+            AppLog("⚠️ 解析云端数据失败: \(error)")
             throw error
         }
     }
@@ -136,13 +136,17 @@ final class CloudSyncManager: ObservableObject {
             }
         } catch {
             self.syncState = .error(error.localizedDescription)
-            print("⚠️ 响应云端变更失败: \(error)")
+            AppLog("⚠️ 响应云端变更失败: \(error)")
         }
     }
 
-    private static func formatDate(_ date: Date) -> String {
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM-dd HH:mm"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    private static func formatDate(_ date: Date) -> String {
+        dateFormatter.string(from: date)
     }
 }

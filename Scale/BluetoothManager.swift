@@ -27,8 +27,6 @@ final class BluetoothManager: NSObject, ObservableObject {
 
     // 目标秤的服务 UUID（沃莱系列）。iOS 拿不到 MAC，只能靠服务/名字过滤。
     private let serviceUUID = CBUUID(string: "FFB0")
-    /// 改成 true 可在控制台打印每一包原始字节与状态机流转
-    private let debugLog = true
     @Published var state: ScaleState = .idle
     @Published var liveWeight: Double? = nil        // 实时体重（未稳定）
     @Published var lastMeasurement: Measurement? = nil
@@ -147,32 +145,27 @@ final class BluetoothManager: NSObject, ObservableObject {
         scale = peripheral
         peripheral.delegate = self
         state = .connecting
-        if debugLog { print("[BLE] 🔗 正在连接设备: \(peripheral.name ?? peripheral.identifier.uuidString)") }
+        AppLog("[BLE] 🔗 正在连接设备: \(peripheral.name ?? peripheral.identifier.uuidString)")
         central.connect(peripheral, options: nil)
     }
 
     /// 把用户资料写给秤，触发它做体脂(阻抗)测量。
     private func sendUserProfile(deviceType: Int) {
         guard let scale, let writeChar else {
-            print("⚠️ 没有可写特征，无法下发用户资料")
+            AppLog("⚠️ 没有可写特征，无法下发用户资料")
             return
         }
         let packet = Scale27.encodeUserInfo(deviceType: deviceType, profile: profile)
         let type: CBCharacteristicWriteType =
             writeChar.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
         scale.writeValue(packet, for: writeChar, type: type)
-        if debugLog {
-            print("📤 已下发用户资料: \(packet.map { String(format: "%02X", $0) }.joined(separator: " "))")
-        }
+        AppLog("📤 已下发用户资料: \(packet.map { String(format: "%02X", $0) }.joined(separator: " "))")
     }
 
     /// 解析一包通知数据（AFU/沃莱 Scale27 协议）。
     /// 体重包(213)只更新实时体重；收到阻抗包(214)代表测量结束 → 锁定并计算。
     private func handle(_ data: Data) {
-        if debugLog {
-            let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-            print("[BLE] 📦 收到原始数据 (\(data.count)B): \(hex)")
-        }
+        AppLog("[BLE] 📦 收到原始数据 (\(data.count)B): \(data.map { String(format: "%02X", $0) }.joined(separator: " "))")
 
         // 收到第一包时下发用户资料
         if !didSendProfile, data.count >= 2 {
@@ -193,7 +186,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                 liveWeight = roundedKg
                 if state != .measuring {
                     state = .measuring
-                    if debugLog { print("[BLE] 🔄 状态切换 -> 测量中 (.measuring)") }
+                    AppLog("[BLE] 🔄 状态切换 -> 测量中 (.measuring)")
                 }
 
                 // 取消离秤倒计时
@@ -203,9 +196,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                     stepOffDebounceTask = nil
                 }
 
-                if debugLog {
-                    print("[BLE] ⚖️ 实时读数: \(String(format: "%.2f", roundedKg)) kg (稳定: \(stable))")
-                }
+                AppLog("[BLE] ⚖️ 实时读数: \(String(format: "%.2f", roundedKg)) kg (稳定: \(stable))")
             } else {
                 // 收到空秤或归零数据 (<= 2.0kg)
                 // 绝不立即置空 liveWeight，彻底杜绝在已连接与数字之间的高频剧烈闪烁！
@@ -216,7 +207,7 @@ final class BluetoothManager: NSObject, ObservableObject {
                     stepOffDebounceTask = Task { @MainActor [weak self] in
                         try? await Task.sleep(nanoseconds: 1_000_000_000) // 1.0 秒平滑防抖确认
                         guard let self, !self.locked, self.lastMeasurement == nil else { return }
-                        if self.debugLog { print("[BLE] 🚶 持续 1.0 秒归零，确认用户离秤，平滑复位回准备状态") }
+                        AppLog("[BLE] 🚶 持续 1.0 秒归零，确认用户离秤，平滑复位回准备状态")
                         self.liveWeight = nil
                         self.state = (self.scale?.state == .connected && self.notifyChar != nil) ? .connected : .idle
                         self.didSendProfile = false
@@ -232,9 +223,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             // 沃莱秤在测量阻抗的过程中也会持续发送 ADC 包，未完成时阻抗通常为 0 或超出有效范围。
             // 此时代表秤还在测量阻抗中（跑马灯采样），绝对不能断开蓝牙或切回错误/就绪状态，直接等待下一包！
             guard let impedance = impedances.first(where: { $0 >= 100 && $0 <= 1500 }) else {
-                if debugLog {
-                    print("[BLE] ⏳ 阻抗采样中（未锁定）：\(impedances)，保持测量状态继续等待有效值...")
-                }
+                AppLog("[BLE] ⏳ 阻抗采样中（未锁定）：\(impedances)，保持测量状态继续等待有效值...")
                 return
             }
 
@@ -247,9 +236,7 @@ final class BluetoothManager: NSObject, ObservableObject {
             stepOffDebounceTask?.cancel()
             stepOffDebounceTask = nil
 
-            if debugLog {
-                print("[BLE] ✅ 测量锁定：体重 \(String(format: "%.2f", weightKg))kg, 阻抗 \(impedance)Ω (全部: \(impedances))")
-            }
+            AppLog("[BLE] ✅ 测量锁定：体重 \(String(format: "%.2f", weightKg))kg, 阻抗 \(impedance)Ω (全部: \(impedances))")
             let m = BodyComposition.calculate(weightKg: weightKg,
                                               impedance: impedance,
                                               profile: profile)
@@ -302,7 +289,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         MainActor.assumeIsolated {
-            if debugLog { print("[BLE] 🔌 蓝牙外设已断开连接: \(peripheral.name ?? "未知设备")") }
+            AppLog("[BLE] 🔌 蓝牙外设已断开连接: \(peripheral.name ?? "未知设备")")
             scanTimeoutTask?.cancel()
             scanTimeoutTask = nil
             stepOffDebounceTask?.cancel()
