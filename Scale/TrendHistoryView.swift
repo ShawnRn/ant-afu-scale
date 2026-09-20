@@ -134,6 +134,19 @@ nonisolated func aggregateDailyRecords(from records: [Measurement]) -> [DailyTre
     return dailyRecords.sorted { $0.id < $1.id }
 }
 
+/// 从真实数据点中均匀抽取横轴日期，确保刻度与折线点严格对齐且标签不过度拥挤。
+nonisolated func sampledTrendAxisDates(from records: [DailyTrendRecord], maxCount: Int = 5) -> [Date] {
+    let dates = records.map(\.id)
+    guard maxCount > 1, dates.count > maxCount else { return dates }
+
+    let lastIndex = dates.count - 1
+    return (0..<maxCount).map { position in
+        let ratio = Double(position) / Double(maxCount - 1)
+        let index = Int((Double(lastIndex) * ratio).rounded())
+        return dates[index]
+    }
+}
+
 /// 根据时间跨度筛选日聚合记录
 nonisolated func filterDailyRecords(_ daily: [DailyTrendRecord], for range: TrendTimeRange) -> [DailyTrendRecord] {
     switch range {
@@ -488,13 +501,13 @@ private struct TrendChartSectionView: View {
 
             if isReady {
                 let count = records.count
-                let method: InterpolationMethod = count > 1 ? .monotone : .linear
+                let method: InterpolationMethod = count >= 3 ? .monotone : .linear
 
                 Chart {
                     ForEach(records) { r in
                         let val = metric.value(from: r)
                         AreaMark(
-                            x: .value("日期", r.id, unit: .day),
+                            x: .value("日期", r.id),
                             yStart: .value("基准", minVal),
                             yEnd: .value("数值", val)
                         )
@@ -511,7 +524,7 @@ private struct TrendChartSectionView: View {
                     ForEach(records) { r in
                         let val = metric.value(from: r)
                         LineMark(
-                            x: .value("日期", r.id, unit: .day),
+                            x: .value("日期", r.id),
                             y: .value("数值", val)
                         )
                         .interpolationMethod(method)
@@ -522,7 +535,7 @@ private struct TrendChartSectionView: View {
                     ForEach(records) { r in
                         let val = metric.value(from: r)
                         PointMark(
-                            x: .value("日期", r.id, unit: .day),
+                            x: .value("日期", r.id),
                             y: .value("数值", val)
                         )
                         .foregroundStyle(color)
@@ -530,7 +543,7 @@ private struct TrendChartSectionView: View {
                 }
                 .chartYScale(domain: minVal...maxVal)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) { _ in
+                    AxisMarks(values: sampledTrendAxisDates(from: records)) { _ in
                         AxisGridLine()
                         AxisTick()
                         AxisValueLabel(format: .dateTime.month(.twoDigits).day(.twoDigits))

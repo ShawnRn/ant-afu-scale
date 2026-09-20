@@ -402,11 +402,10 @@ struct MeasurementResultView<AvatarContent: View>: View {
             }
             .padding()
         }
-        .background(TabBarVisibilityHelper())
+        .background(TabBarTransitionHelper())
         .navigationTitle("测量结果")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -489,8 +488,8 @@ struct MeasurementResultView<AvatarContent: View>: View {
     }
 }
 
-// MARK: - 保证测量结果二级页存续期间底栏始终隐藏，仅在完整返回后恢复
-private struct TabBarVisibilityHelper: UIViewControllerRepresentable {
+// MARK: - 底栏随导航转场渐隐渐现，取消滑动返回后继续保持隐藏
+private struct TabBarTransitionHelper: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> HelperVC {
         let vc = HelperVC()
         vc.view.backgroundColor = .clear
@@ -509,7 +508,7 @@ private struct TabBarVisibilityHelper: UIViewControllerRepresentable {
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
-            setTabBarHidden(true)
+            animateTabBar(hidden: true)
         }
 
         override func viewDidAppear(_ animated: Bool) {
@@ -519,16 +518,7 @@ private struct TabBarVisibilityHelper: UIViewControllerRepresentable {
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
-            // 交互式返回开始后仍保持隐藏，避免手势取消或尚未完成时底栏提前出现。
-            setTabBarHidden(true)
-
-            transitionCoordinator?.animate(alongsideTransition: nil) { context in
-                if context.isCancelled {
-                    self.setTabBarHidden(true)
-                } else {
-                    self.restoreTabBarAfterCompletedPop()
-                }
-            }
+            animateTabBar(hidden: false)
         }
 
         override func viewDidDisappear(_ animated: Bool) {
@@ -540,6 +530,26 @@ private struct TabBarVisibilityHelper: UIViewControllerRepresentable {
             guard let tabBar = tabBarController?.tabBar else { return }
             tabBar.alpha = hidden ? 0.0 : 1.0
             tabBar.isUserInteractionEnabled = !hidden
+        }
+
+        private func animateTabBar(hidden: Bool) {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            let targetAlpha: CGFloat = hidden ? 0.0 : 1.0
+
+            if let coordinator = transitionCoordinator {
+                // 交互式返回会自动按手势进度驱动此动画，取消时也会跟随系统转场反向退回。
+                coordinator.animate(alongsideTransition: { _ in
+                    tabBar.alpha = targetAlpha
+                }, completion: { context in
+                    if context.isCancelled {
+                        self.setTabBarHidden(!hidden)
+                    } else {
+                        self.setTabBarHidden(hidden)
+                    }
+                })
+            } else {
+                setTabBarHidden(hidden)
+            }
         }
 
         private func restoreTabBarAfterCompletedPop() {
@@ -699,17 +709,18 @@ private struct RecentTrendCardView: View {
         let span = max(maxRaw - minRaw, selectedMetric == .weight ? 1.0 : 0.5)
         let minVal = max(0, minRaw - span * 0.25)
         let maxVal = maxRaw + span * 0.25
+        let interpolationMethod: InterpolationMethod = records.count >= 3 ? .monotone : .linear
 
         return Chart {
             // 渐变面积图
             ForEach(records) { r in
                 let val = selectedMetric.value(from: r)
                 AreaMark(
-                    x: .value("日期", r.id, unit: .day),
+                    x: .value("日期", r.id),
                     yStart: .value("基准", minVal),
                     yEnd: .value("数值", val)
                 )
-                .interpolationMethod(.monotone)
+                .interpolationMethod(interpolationMethod)
                 .foregroundStyle(
                     LinearGradient(
                         colors: [color.opacity(0.22), color.opacity(0.02)],
@@ -723,10 +734,10 @@ private struct RecentTrendCardView: View {
             ForEach(records) { r in
                 let val = selectedMetric.value(from: r)
                 LineMark(
-                    x: .value("日期", r.id, unit: .day),
+                    x: .value("日期", r.id),
                     y: .value("数值", val)
                 )
-                .interpolationMethod(.monotone)
+                .interpolationMethod(interpolationMethod)
                 .lineStyle(StrokeStyle(lineWidth: 2.5))
                 .foregroundStyle(color)
             }
@@ -736,7 +747,7 @@ private struct RecentTrendCardView: View {
             ForEach(records.filter { $0.id != currentDay }) { r in
                 let val = selectedMetric.value(from: r)
                 PointMark(
-                    x: .value("日期", r.id, unit: .day),
+                    x: .value("日期", r.id),
                     y: .value("数值", val)
                 )
                 .foregroundStyle(color)
@@ -746,7 +757,7 @@ private struct RecentTrendCardView: View {
             // 本次测量专属高亮点
             let currentVal = selectedMetric.value(from: current)
             PointMark(
-                x: .value("日期", currentDay, unit: .day),
+                x: .value("日期", currentDay),
                 y: .value("数值", currentVal)
             )
             .foregroundStyle(color)
@@ -763,7 +774,7 @@ private struct RecentTrendCardView: View {
         }
         .chartYScale(domain: minVal...maxVal)
         .chartXAxis {
-            AxisMarks(values: records.map(\.id)) { value in
+            AxisMarks(values: sampledTrendAxisDates(from: records)) { value in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
                     .foregroundStyle(Color.secondary.opacity(0.2))
                 AxisTick()
